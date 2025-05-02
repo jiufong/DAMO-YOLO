@@ -2,13 +2,16 @@
 # Copyright (C) Alibaba Group Holding Limited. All rights reserved.
 import argparse
 import copy
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import torch
 from loguru import logger
 
 from damo.apis import Trainer
 from damo.config.base import parse_config
-from damo.utils import synchronize
 
 
 def make_parser():
@@ -24,7 +27,7 @@ def make_parser():
     parser.add_argument(
         '-f',
         '--config_file',
-        default=None,
+        default=os.environ["CONFIG_FILE"],
         type=str,
         help='plz input your config file',
     )
@@ -45,8 +48,8 @@ def main():
     args = make_parser().parse_args()
 
     torch.cuda.set_device(args.local_rank)
-    torch.distributed.init_process_group(backend='nccl', init_method='env://')
-    synchronize()
+    # torch.distributed.init_process_group(backend='nccl', init_method='env://')
+    # synchronize()
     if args.tea_config is not None:
         tea_config = parse_config(args.tea_config)
     else:

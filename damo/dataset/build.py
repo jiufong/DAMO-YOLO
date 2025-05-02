@@ -12,6 +12,7 @@ from .collate_batch import BatchCollator
 from .datasets import MosaicWrapper
 from .samplers import DistributedSampler, IterationBasedBatchSampler
 from .transforms import build_transforms
+from torch.utils.data import RandomSampler
 
 
 def build_dataset(cfg, ann_files, is_train=True, mosaic_mixup=None):
@@ -51,7 +52,7 @@ def build_dataset(cfg, ann_files, is_train=True, mosaic_mixup=None):
 
 def make_data_sampler(dataset, shuffle):
 
-    return DistributedSampler(dataset, shuffle=shuffle)
+    return RandomSampler(dataset)
 
 
 def _quantize(x, bins):

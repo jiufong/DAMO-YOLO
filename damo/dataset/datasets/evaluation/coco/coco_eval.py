@@ -10,6 +10,8 @@ from loguru import logger
 from damo.structures.bounding_box import BoxList
 from damo.structures.boxlist_ops import boxlist_iou
 
+import json
+import numpy as np
 
 def do_coco_evaluation(
     dataset,
@@ -61,6 +63,23 @@ def do_coco_evaluation(
                            expected_results_sigma_tol)
     if output_folder:
         torch.save(results, os.path.join(output_folder, 'coco_results.pth'))
+
+        def convert_np_float(data):
+            if isinstance(data, np.float64):
+                return float(data)
+            elif isinstance(data, dict):
+                return {key: convert_np_float(value) for key, value in data.items()}
+            elif isinstance(data, list):
+                return [convert_np_float(item) for item in data]
+            else:
+                return data
+
+        conv_results = convert_np_float(results.results)
+
+        # Write to JSON file
+        with open(os.path.join(output_folder, 'metrics.json'), 'w') as json_file:
+            json.dump(conv_results, json_file)
+
     return results, coco_results
 
 

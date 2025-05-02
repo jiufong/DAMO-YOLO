@@ -3,23 +3,31 @@
 """Centralized catalog of paths."""
 import os
 
-
 class DatasetCatalog(object):
-    DATA_DIR = 'datasets'
+    DATA_DIR = os.environ["SM_CHANNEL_TRAIN"]
+    TRAIN_IMAGE_DIR = 'train/images'
+    TRAIN_ANNOTATION_FILE = 'train/annotations/annotations.coco.txt'
+
+    VALID_IMAGE_DIR = 'valid/images'
+    VALID_ANNOTATION_FILE = 'valid/annotations/annotations.coco.txt'
+
+    TEST_IMAGE_DIR = 'test/images'
+    TEST_ANNOTATION_FILE = 'test/annotations/annotations.coco.txt'
+
     DATASETS = {
-        'coco_2017_train': {
-            'img_dir': 'coco/train2017',
-            'ann_file': 'coco/annotations/instances_train2017.json'
+        'train_coco': {
+            'img_dir': TRAIN_IMAGE_DIR,
+            'ann_file': TRAIN_ANNOTATION_FILE
         },
-        'coco_2017_val': {
-            'img_dir': 'coco/val2017',
-            'ann_file': 'coco/annotations/instances_val2017.json'
+        'valid_coco': {
+            'img_dir': VALID_IMAGE_DIR,
+            'ann_file': VALID_ANNOTATION_FILE
         },
-        'coco_2017_test_dev': {
-            'img_dir': 'coco/test2017',
-            'ann_file': 'coco/annotations/image_info_test-dev2017.json'
-        },
+        'test_coco': {
+            'img_dir': TEST_IMAGE_DIR,
+            'ann_file': TEST_ANNOTATION_FILE
         }
+    }
 
     @staticmethod
     def get(name):

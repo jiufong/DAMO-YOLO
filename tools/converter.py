@@ -14,6 +14,8 @@ from damo.config.base import parse_config
 from damo.detectors.detector import build_local_model
 from damo.utils.model_utils import get_model_info, replace_module
 
+import os
+
 
 def make_parser():
     parser = argparse.ArgumentParser('damo converter deployment toolbox')
@@ -26,7 +28,7 @@ def make_parser():
     parser.add_argument(
         '-f',
         '--config_file',
-        default=None,
+        default=os.environ["CONFIG_FILE"],
         type=str,
         help='expriment description file',
     )
@@ -37,7 +39,7 @@ def make_parser():
     )
     parser.add_argument('-c',
                         '--ckpt',
-                        default=None,
+                        default=os.path.join(os.environ["SM_OUTPUT_DATA_DIR"], "damoyolo_tinynasL25_S.pth"),
                         type=str,
                         help='ckpt path')
     parser.add_argument('--trt',
@@ -48,7 +50,7 @@ def make_parser():
         help='one type of int8, fp16, fp32')
     parser.add_argument('--batch_size',
                         type=int,
-                        default=None,
+                        default="1",
                         help='inference image batch nums')
     parser.add_argument('--img_size',
                         type=int,
@@ -179,6 +181,7 @@ def main():
 
     logger.info('args value: {}'.format(args))
     onnx_name = args.config_file.split('/')[-1].replace('.py', '.onnx')
+    onnx_name = os.path.join(os.environ["SM_OUTPUT_DATA_DIR"], onnx_name)
 
     if args.end2end:
         onnx_name = onnx_name.replace('.onnx', '_end2end.onnx')
@@ -235,7 +238,7 @@ def main():
     dummy_input = torch.randn(args.batch_size, 3, args.img_size,
                               args.img_size).to(device)
     _ = model(dummy_input)
-    torch.onnx._export(
+    torch.onnx.export(
         model,
         dummy_input,
         onnx_name,

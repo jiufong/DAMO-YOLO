@@ -1,0 +1,10 @@
+SM_CHANNEL_TRAIN=inputs # do not use this entry when training on Sagemaker
+MODEL_NAME=damoyolo_tinynasL25_S
+FINE_TUNE_PATH=inputs/damoyolo_tinynasL25_S_477.pth
+CONFIG_FILE=inputs/damoyolo_tinynasL25_S.py
+CLASS_NAMES=objects,no screw,screw
+NUM_CLASSES=3
+TOTAL_EPOCHS=100
+BATCH_SIZE=20
+LEARNING_RATE=0.05
+SM_OUTPUT_DATA_DIR=outputs # do not use this entry when training on Sagemaker

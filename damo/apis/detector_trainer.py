@@ -22,6 +22,10 @@ from damo.utils import (MeterBuffer, get_model_info, get_rank, gpu_mem_usage,
 
 from torch.nn import GroupNorm, LayerNorm
 from torch.nn.modules.batchnorm import _BatchNorm
+
+import subprocess
+import json
+
 NORMS = (GroupNorm, LayerNorm, _BatchNorm)
 
 def mkdir(path):
@@ -77,7 +81,7 @@ class ema_model:
 
     def update(self, iters, student):
 
-        student = student.module.state_dict()
+        student = student.state_dict()
         with torch.no_grad():
             momentum = self.ema_scheduler(iters)
             for name, param in self.model.state_dict().items():
@@ -91,21 +95,21 @@ class Trainer:
         self.cfg = cfg
         self.tea_cfg = tea_cfg
         self.args = args
-        self.output_dir = cfg.miscs.output_dir
+        self.output_dir = os.environ["SM_OUTPUT_DATA_DIR"] 
         self.exp_name = cfg.miscs.exp_name
         self.device = 'cuda'
 
         # set_seed(cfg.miscs.seed)
         # metric record
         self.meter = MeterBuffer(window_size=cfg.miscs.print_interval_iters)
-        self.file_name = os.path.join(cfg.miscs.output_dir, cfg.miscs.exp_name)
+        self.file_name = os.environ["SM_OUTPUT_DATA_DIR"]
 
         # setup logger
         if get_rank() == 0:
             os.makedirs(self.file_name, exist_ok=True)
 
         setup_logger(
-            self.file_name,
+            os.environ["SM_OUTPUT_DATA_DIR"],
             distributed_rank=get_rank(),
             mode='w',
             )
@@ -162,7 +166,7 @@ class Trainer:
             self.ema_model = None
 
         # dataloader
-        self.train_loader, self.val_loader, iters = self.get_data_loader(cfg)
+        self.train_loader, self.val_loader, self.test_loader, iters = self.get_data_loader(cfg)
 
         # setup iters according epochs and iters_per_epoch
         self.setup_iters(iters, self.start_epoch, cfg.train.total_epochs,
@@ -186,6 +190,7 @@ class Trainer:
             is_train=True,
             mosaic_mixup=cfg.train.augment.mosaic_mixup)
         val_dataset = build_dataset(cfg, cfg.dataset.val_ann, is_train=False)
+        test_dataset = build_dataset(cfg, cfg.dataset.test_ann, is_train=False)
 
         iters_per_epoch = math.ceil(
             len(train_dataset[0]) /
@@ -206,8 +211,15 @@ class Trainer:
                                       num_workers=cfg.miscs.num_workers,
                                       is_train=False,
                                       size_div=32)
+        
+        test_loader = build_dataloader(test_dataset,
+                                      cfg.test.augment,
+                                      batch_size=cfg.test.batch_size,
+                                      num_workers=cfg.miscs.num_workers,
+                                      is_train=False,
+                                      size_div=32)
 
-        return train_loader, val_loader, iters_per_epoch
+        return train_loader, val_loader, test_loader, iters_per_epoch
 
     def setup_iters(self, iters_per_epoch, start_epoch, total_epochs,
                     warmup_epochs, no_aug_epochs, eval_interval_epochs,
@@ -267,7 +279,7 @@ class Trainer:
             get_model_info(self.model, (infer_shape, infer_shape))))
 
         # distributed model init
-        self.model = build_ddp_model(self.model, local_rank)
+        # self.model = build_ddp_model(self.model, local_rank)
         logger.info('Model: {}'.format(self.model))
 
         logger.info('Training start...')
@@ -276,6 +288,9 @@ class Trainer:
         self.model.train()
         iter_start_time = time.time()
         iter_end_time = time.time()
+
+        losses = []
+
         for data_iter, (inps, targets, ids) in enumerate(self.train_loader):
             cur_iter = self.start_iter + data_iter
 
@@ -372,9 +387,9 @@ class Trainer:
                     inps.tensors.shape[2], inps.tensors.shape[3], eta_str)))
                 self.meter.clear_meters()
 
-            if (cur_iter + 1) % self.ckpt_interval_iters == 0:
-                self.save_ckpt('epoch_%d' % (self.epoch + 1),
-                               local_rank=local_rank)
+            # if (cur_iter + 1) % self.ckpt_interval_iters == 0:
+            #     self.save_ckpt('epoch_%d' % (self.epoch + 1),
+            #                    local_rank=local_rank)
 
             if (cur_iter + 1) % self.eval_interval_iters == 0:
                 time.sleep(0.003)
@@ -385,7 +400,18 @@ class Trainer:
             if (cur_iter + 1) % self.iters_per_epoch == 0:
                 self.epoch = self.epoch + 1
 
-        self.save_ckpt(ckpt_name='latest', local_rank=local_rank)
+            losses.append([ { k : v.avg } for k, v in self.meter.get_filtered_meter('loss').items()])
+
+        self.save_ckpt(ckpt_name=os.environ["MODEL_NAME"], local_rank=local_rank)
+        
+        subprocess.run(["python3", "tools/converter.py"])
+
+        self.evaluate(local_rank, self.cfg.dataset.test_ann, test=True)
+
+        with open(os.path.join(os.environ["SM_OUTPUT_DATA_DIR"],'losses.json'), 'w') as json_file:
+            json.dump(losses, json_file)
+
+        print("Losses saved to 'losses.json'")
 
     def save_ckpt(self, ckpt_name, local_rank, update_best_ckpt=False):
         if local_rank == 0:
@@ -423,8 +449,14 @@ class Trainer:
             resume_epoch = ckpt['epoch']
             return resume_epoch
 
-    def evaluate(self, local_rank, val_ann):
-        assert len(self.val_loader) == len(val_ann)
+    def evaluate(self, local_rank, ann, test=False):
+        data_loader = None
+        if not test:
+            data_loader = self.val_loader
+        else:
+            data_loader = self.test_loader
+
+        assert len(data_loader) == len(ann)
         if self.ema_model is not None:
             evalmodel = self.ema_model.model
         else:
@@ -432,16 +464,15 @@ class Trainer:
             if isinstance(evalmodel, DDP):
                 evalmodel = evalmodel.module
 
-        output_folders = [None] * len(val_ann)
-        for idx, dataset_name in enumerate(val_ann):
-            output_folder = os.path.join(self.output_dir, self.exp_name,
-                                         'inference', dataset_name)
+        output_folders = [None] * len(ann)
+        for idx, dataset_name in enumerate(ann):
+            output_folder = os.environ["SM_OUTPUT_DATA_DIR"]
             if local_rank == 0:
                 mkdir(output_folder)
             output_folders[idx] = output_folder
 
         for output_folder, dataset_name, data_loader_val in zip(
-                output_folders, val_ann, self.val_loader):
+                output_folders, ann, data_loader):
             inference(
                 evalmodel,
                 data_loader_val,

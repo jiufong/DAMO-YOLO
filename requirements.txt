@@ -9,3 +9,11 @@ Pillow
 thop
 tabulate
 easydict
+cython
+pycocotools
+onnx
+onnxruntime
+onnx-simplifier
+python-dotenv
+typing-extensions
+sagemaker-training
